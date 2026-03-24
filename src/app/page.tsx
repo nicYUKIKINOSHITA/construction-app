@@ -18,23 +18,25 @@ export default function LoginPage() {
       router.replace('/projects');
       return;
     }
-    supabase
-      .from('users')
-      .select('*')
-      .order('name')
-      .then(({ data, error: fetchError }) => {
+    const fetchUsers = async () => {
+      try {
+        const { data, error: fetchError } = await supabase
+          .from('users')
+          .select('*')
+          .order('name');
         if (fetchError) {
           console.error('Supabase error:', fetchError);
           setError(`接続エラー: ${fetchError.message}`);
         }
         setUsers(data || []);
-        setLoading(false);
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error('Network error:', err);
         setError('サーバーに接続できません。ページを再読み込みしてください。');
+      } finally {
         setLoading(false);
-      });
+      }
+    };
+    fetchUsers();
   }, [user, router]);
 
   if (user) return null;

@@ -9,157 +9,98 @@ export interface ParsedEstimate {
 
 // Load pdfjs from CDN
 async function loadPdfJs(): Promise<any> {
-  const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174';
-
-  if ((window as any).__pdfjsLib) {
-    return (window as any).__pdfjsLib;
-  }
-
+  const CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174';
+  if ((window as any).__pdfjsLib) return (window as any).__pdfjsLib;
   return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = `${PDFJS_CDN}/pdf.min.js`;
-    script.onload = () => {
+    const s = document.createElement('script');
+    s.src = `${CDN}/pdf.min.js`;
+    s.onload = () => {
       const lib = (window as any).pdfjsLib;
-      lib.GlobalWorkerOptions.workerSrc = `${PDFJS_CDN}/pdf.worker.min.js`;
+      lib.GlobalWorkerOptions.workerSrc = `${CDN}/pdf.worker.min.js`;
       (window as any).__pdfjsLib = lib;
       resolve(lib);
     };
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
-
-// Group text items by Y position to reconstruct lines
-function extractLines(items: any[]): string[] {
-  if (!items.length) return [];
-
-  // Group by Y coordinate (with tolerance)
-  const rows: Map<number, { x: number; str: string }[]> = new Map();
-  for (const item of items) {
-    if (!item.str || item.str.trim() === '') continue;
-    const y = Math.round(item.transform[5]); // Y position
-    const x = item.transform[4]; // X position
-
-    // Find closest Y within tolerance of 3
-    let foundY = y;
-    for (const key of rows.keys()) {
-      if (Math.abs(key - y) < 3) {
-        foundY = key;
-        break;
-      }
-    }
-
-    if (!rows.has(foundY)) rows.set(foundY, []);
-    rows.get(foundY)!.push({ x, str: item.str });
-  }
-
-  // Sort by Y descending (PDF coordinates are bottom-up)
-  const sortedRows = [...rows.entries()].sort((a, b) => b[0] - a[0]);
-
-  // Sort each row by X and join
-  return sortedRows.map(([, cells]) => {
-    cells.sort((a, b) => a.x - b.x);
-    return cells.map((c) => c.str).join(' ');
+    s.onerror = reject;
+    document.head.appendChild(s);
   });
 }
 
 export async function parsePdf(file: File): Promise<ParsedEstimate> {
   const pdfjsLib = await loadPdfJs();
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
 
-  const allLines: string[] = [];
-
+  // Step 1: Flatten ALL text into one string — no position/row logic
+  const chunks: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const lines = extractLines(content.items);
-    allLines.push(...lines);
+    const c = await page.getTextContent();
+    for (const item of c.items) {
+      if (item.str) chunks.push(item.str);
+    }
   }
+  const text = chunks.join(' ');
 
-  const fullText = allLines.join('\n');
-
-  // === Extract project name ===
+  // Step 2: Project name — grab text after 工事名, stop at next label
   let projectName = '';
-  for (const line of allLines) {
-    // 工事名の行
-    if (line.includes('工') && line.includes('事') && line.includes('名')) {
-      const after = line.replace(/.*工\s*事\s*名\s*/, '').trim();
-      if (after) {
-        projectName = after.split(/\s{3,}/)[0].trim();
-      }
-    }
-    // 見積件名の行
-    if (line.includes('見') && line.includes('積') && line.includes('件') && line.includes('名') && !line.includes('見積書番号')) {
-      const after = line.replace(/.*見\s*積\s*件\s*名\s*/, '').trim();
-      if (after) {
-        const kenName = after.split(/\s{3,}/)[0].trim();
-        projectName = projectName ? `${projectName} ${kenName}` : kenName;
-      }
-    }
+  const pnM = text.match(
+    /工\s*事\s*名[：:\s]*(.+?)(?=\s*(?:工\s*期|納\s*期|見\s*積\s*件\s*名|御見積|合\s*計|摘\s*要|番\s*号|PJ))/,
+  );
+  if (pnM) projectName = pnM[1].replace(/\s+/g, ' ').trim();
+
+  // Append 見積件名 if found
+  const knM = text.match(
+    /見\s*積\s*件\s*名[：:\s]*(.+?)(?=\s*(?:工\s*期|納\s*期|御見積|合\s*計|摘\s*要|番\s*号|PJ|数\s*量))/,
+  );
+  if (knM) {
+    const kn = knM[1].replace(/\s+/g, ' ').trim();
+    projectName = projectName ? `${projectName} ${kn}` : kn;
   }
 
-  // === Extract deadline from 工期 ===
+  // Step 3: Deadline — last YYYY年MM月DD日 (end of 工期)
   let deadline = '';
-  for (const line of allLines) {
-    // 工期・納期 の行から終了日を取得
-    const dateMatch = line.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/g);
-    if (dateMatch && dateMatch.length >= 2) {
-      // 2番目の日付が終了日
-      const endMatch = dateMatch[dateMatch.length - 1].match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-      if (endMatch) {
-        deadline = `${endMatch[1]}-${endMatch[2].padStart(2, '0')}-${endMatch[3].padStart(2, '0')}`;
-      }
-    }
+  const dates = [...text.matchAll(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/g)];
+  if (dates.length > 0) {
+    const d = dates[dates.length - 1];
+    deadline = `${d[1]}-${d[2].padStart(2, '0')}-${d[3].padStart(2, '0')}`;
   }
 
-  // === Extract line items from 明細 ===
+  // Step 4: Find items by qty+unit+unitPrice+amount pattern in flat text
+  const UNITS = 'ｍ|m|式|か所|箇所|ヶ所|ケ所|本|枚|台|セット|組|個|面|kg|ｋｇ|㎡|㎥|t|ｔ';
+  const re = new RegExp(
+    `(\\d+[.,]\\d{1,3})\\s*(${UNITS})\\s+([\\d,]+[.,]\\d{2})\\s+([\\d,]+)`,
+    'g',
+  );
   const items: { name: string }[] = [];
+  const seen = new Set<string>();
+  let m;
 
-  for (const line of allLines) {
-    // 数量+単位+単価のパターンを探す
-    const qtyPattern = /(\d+\.\d{3})\s+(ｍ|m|式|か所|箇所|本|枚|台|セット|組|個|面)\s+([\d,]+\.\d{2})/;
-    const qtyMatch = line.match(qtyPattern);
+  while ((m = re.exec(text)) !== null) {
+    const qty = m[1].replace(',', '.');
+    const unit = m[2];
+    const unitPrice = parseFloat(m[3].replace(/,/g, ''));
+    if (unit === '式' && unitPrice >= 1_000_000) continue;
 
-    if (!qtyMatch) continue;
-
-    const qty = qtyMatch[1];
-    const unit = qtyMatch[2];
-    const price = parseFloat(qtyMatch[3].replace(/,/g, ''));
-
-    // 数量の前のテキストが品名
-    const beforeQty = line.substring(0, line.indexOf(qtyMatch[0])).trim();
-
-    // Skip: 端数調整, カテゴリヘッダ（大金額の式）, 空行
-    if (!beforeQty) continue;
-    if (beforeQty.includes('端数調整')) continue;
-    if (beforeQty.includes('小計') || beforeQty.includes('合計')) continue;
-
-    // カテゴリヘッダ（金属工事、歩廊庇等の大分類）をスキップ
-    if (unit === '式' && price >= 1000000) continue;
-
-    // Clean up name
-    let name = beforeQty
-      .replace(/^\d+\s*/, '') // 先頭の番号削除
-      .replace(/\s+/g, ' ')
-      .trim();
+    // Look backwards up to 300 chars for the item name
+    const before = text.substring(Math.max(0, m.index - 300), m.index);
+    // Split on 3+ spaces or row-number boundaries, take last meaningful chunk
+    const parts = before.split(/\s{3,}|\d{1,3}\s{2,}(?=\S{2})/).filter(Boolean);
+    let name = (parts[parts.length - 1] || '').replace(/\s+/g, ' ').trim();
+    name = name.replace(/^\d+\s+/, ''); // strip leading row number
 
     if (!name || name.length < 2) continue;
+    if (/端数調整|小計|合計/.test(name)) continue;
 
-    const displayName = `${name}（${qty}${unit}）`;
-
-    if (!items.some((i) => i.name === displayName)) {
-      items.push({ name: displayName });
+    const display = `${name}（${qty}${unit}）`;
+    if (!seen.has(display)) {
+      seen.add(display);
+      items.push({ name: display });
     }
   }
 
-  // Fallback: ファイル名から案件名
+  // Fallback: project name from filename
   if (!projectName) {
-    projectName = file.name
-      .replace(/\.pdf$/i, '')
-      .replace(/^E\d+_/, '')
-      .replace(/_/g, ' ');
+    projectName = file.name.replace(/\.pdf$/i, '').replace(/^E\d+_/, '').replace(/_/g, ' ');
   }
 
-  return { projectName, deadline, items, rawText: fullText };
+  return { projectName, deadline, items, rawText: text };
 }
