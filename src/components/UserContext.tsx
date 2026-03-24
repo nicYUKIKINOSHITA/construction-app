@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { supabase } from '@/lib/supabase';
 import type { User } from '@/lib/types';
 
 interface UserContextType {
@@ -23,7 +24,22 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const stored = localStorage.getItem('currentUser');
     if (stored) {
       try {
-        setUserState(JSON.parse(stored));
+        const parsed = JSON.parse(stored) as User;
+        // Verify user still exists in DB
+        supabase
+          .from('users')
+          .select('id, name')
+          .eq('id', parsed.id)
+          .single()
+          .then(({ data }) => {
+            if (data) {
+              setUserState(data as User);
+            } else {
+              localStorage.removeItem('currentUser');
+            }
+            setLoaded(true);
+          });
+        return;
       } catch {
         localStorage.removeItem('currentUser');
       }
