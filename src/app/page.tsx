@@ -11,6 +11,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -21,8 +22,17 @@ export default function LoginPage() {
       .from('users')
       .select('*')
       .order('name')
-      .then(({ data }) => {
+      .then(({ data, error: fetchError }) => {
+        if (fetchError) {
+          console.error('Supabase error:', fetchError);
+          setError(`接続エラー: ${fetchError.message}`);
+        }
         setUsers(data || []);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error('Network error:', err);
+        setError('サーバーに接続できません。ページを再読み込みしてください。');
         setLoading(false);
       });
   }, [user, router]);
@@ -39,6 +49,18 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <h1 className="text-2xl font-bold text-center mb-2">工事チェック</h1>
         <p className="text-gray-500 text-center mb-8 text-sm">名前を選択してログイン</p>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+            {error}
+            <button
+              onClick={() => window.location.reload()}
+              className="block mt-2 text-blue-600 underline"
+            >
+              再読み込み
+            </button>
+          </div>
+        )}
 
         {loading ? (
           <div className="text-center text-gray-400">読み込み中...</div>
