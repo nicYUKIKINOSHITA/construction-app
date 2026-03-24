@@ -17,12 +17,13 @@ export default function NewProjectPage() {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [saving, setSaving] = useState(false);
+  const [parsing, setParsing] = useState(false);
 
   const [name, setName] = useState('');
   const [assigneeId, setAssigneeId] = useState('');
   const [notifyDays, setNotifyDays] = useState(7);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [items, setItems] = useState<ItemInput[]>([{ name: '', deadline: '' }]);
+  const [items, setItems] = useState<ItemInput[]>([]);
 
   useEffect(() => {
     if (!user) {
@@ -38,17 +39,62 @@ export default function NewProjectPage() {
       });
   }, [user, router]);
 
-  const addItem = () => setItems([...items, { name: '', deadline: '' }]);
+  async function handlePdfUpload(file: File) {
+    setPdfFile(file);
+    setParsing(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('pdf', file);
+
+      const res = await fetch('/api/parse-pdf', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error('Parse failed');
+
+      const data = await res.json();
+
+      // Auto-fill project name
+      if (data.projectName) {
+        setName(data.projectName);
+      }
+
+      // Auto-fill items
+      if (data.items && data.items.length > 0) {
+        setItems(
+          data.items.map((item: { name: string; spec?: string; quantity?: string; unit?: string }) => ({
+            name: item.spec
+              ? `${item.name} ${item.spec} ${item.quantity || ''}${item.unit || ''}`.trim()
+              : `${item.name} ${item.quantity || ''}${item.unit || ''}`.trim(),
+            deadline: '',
+          }))
+        );
+      }
+    } catch (err) {
+      console.error('PDF parse error:', err);
+      alert('PDFの読み取りに失敗しました。明細を手動で入力してください。');
+    } finally {
+      setParsing(false);
+    }
+  }
 
   const removeItem = (index: number) => {
-    if (items.length <= 1) return;
     setItems(items.filter((_, i) => i !== index));
   };
+
+  const addItem = () => setItems([...items, { name: '', deadline: '' }]);
 
   const updateItem = (index: number, field: keyof ItemInput, value: string) => {
     const updated = [...items];
     updated[index] = { ...updated[index], [field]: value };
     setItems(updated);
+  };
+
+  // Set all deadlines at once
+  const setAllDeadlines = (deadline: string) => {
+    setItems(items.map((item) => ({ ...item, deadline })));
   };
 
   async function handleSubmit(e: React.FormEvent) {
@@ -57,12 +103,15 @@ export default function NewProjectPage() {
     if (!name.trim() || !assigneeId) return;
 
     const validItems = items.filter((i) => i.name.trim() && i.deadline);
-    if (validItems.length === 0) return;
+    if (validItems.length === 0) {
+      alert('明細が入力されていません');
+      return;
+    }
 
     setSaving(true);
 
     try {
-      // Upload PDF if present
+      // Upload PDF
       let pdfUrl: string | null = null;
       if (pdfFile) {
         const fileName = `${Date.now()}_${pdfFile.name}`;
@@ -128,7 +177,28 @@ export default function NewProjectPage() {
       </header>
 
       <form onSubmit={handleSubmit} className="p-4 space-y-5">
-        {/* Project name */}
+        {/* PDF upload - FIRST */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            見積PDF（アップロードで案件名・明細を自動取得）
+          </label>
+          <input
+            type="file"
+            accept=".pdf"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handlePdfUpload(file);
+            }}
+            className="w-full text-sm"
+          />
+          {parsing && (
+            <div className="mt-2 text-sm text-blue-600 animate-pulse">
+              PDFを解析中...
+            </div>
+          )}
+        </div>
+
+        {/* Project name (auto-filled) */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">案件名</label>
           <input
@@ -136,7 +206,7 @@ export default function NewProjectPage() {
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="例：新唐津市民会館"
+            placeholder="PDFアップロードで自動入力"
             className="w-full py-3 px-4 border border-gray-200 rounded-xl text-sm"
           />
         </div>
@@ -157,17 +227,6 @@ export default function NewProjectPage() {
           </select>
         </div>
 
-        {/* PDF upload */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">見積PDF</label>
-          <input
-            type="file"
-            accept=".pdf"
-            onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
-            className="w-full text-sm"
-          />
-        </div>
-
         {/* Notification days */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">通知（期限の何日前）</label>
@@ -184,52 +243,68 @@ export default function NewProjectPage() {
           </div>
         </div>
 
-        {/* Items */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">明細</label>
-          <div className="space-y-3">
-            {items.map((item, i) => (
-              <div key={i} className="flex gap-2 items-start">
-                <div className="flex-1 space-y-2">
-                  <input
-                    type="text"
-                    placeholder="明細名"
-                    value={item.name}
-                    onChange={(e) => updateItem(i, 'name', e.target.value)}
-                    className="w-full py-2 px-3 border border-gray-200 rounded-lg text-sm"
-                  />
-                  <input
-                    type="date"
-                    value={item.deadline}
-                    onChange={(e) => updateItem(i, 'deadline', e.target.value)}
-                    className="w-full py-2 px-3 border border-gray-200 rounded-lg text-sm"
-                  />
-                </div>
-                {items.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeItem(i)}
-                    className="mt-2 text-red-400 text-xl px-2"
-                  >
-                    ×
-                  </button>
-                )}
+        {/* Items (auto-filled from PDF) */}
+        {items.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-gray-700">
+                明細（{items.length}件）
+              </label>
+              {/* Bulk deadline setter */}
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500">一括期限：</span>
+                <input
+                  type="date"
+                  onChange={(e) => {
+                    if (e.target.value) setAllDeadlines(e.target.value);
+                  }}
+                  className="py-1 px-2 border border-gray-200 rounded-lg text-xs"
+                />
               </div>
-            ))}
+            </div>
+            <div className="space-y-2">
+              {items.map((item, i) => (
+                <div key={i} className="bg-white border border-gray-200 rounded-lg p-3">
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 space-y-2">
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => updateItem(i, 'name', e.target.value)}
+                        className="w-full py-1.5 px-2 border border-gray-200 rounded text-sm"
+                      />
+                      <input
+                        type="date"
+                        value={item.deadline}
+                        onChange={(e) => updateItem(i, 'deadline', e.target.value)}
+                        className="w-full py-1.5 px-2 border border-gray-200 rounded text-sm"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeItem(i)}
+                      className="text-red-400 text-lg px-1 mt-1"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={addItem}
+              className="mt-2 w-full py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-500 active:bg-gray-50"
+            >
+              ＋ 明細追加
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={addItem}
-            className="mt-3 w-full py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-500 active:bg-gray-50"
-          >
-            ＋ 明細追加
-          </button>
-        </div>
+        )}
 
         {/* Submit */}
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || parsing || items.length === 0}
           className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold text-base disabled:opacity-50"
         >
           {saving ? '登録中...' : '登録する'}
