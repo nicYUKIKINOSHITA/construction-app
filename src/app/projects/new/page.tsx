@@ -19,6 +19,7 @@ export default function NewProjectPage() {
   const [saving, setSaving] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [pdfLoaded, setPdfLoaded] = useState(false);
+  const [parseError, setParseError] = useState('');
 
   const [name, setName] = useState('');
   const [assigneeId, setAssigneeId] = useState('');
@@ -44,35 +45,40 @@ export default function NewProjectPage() {
     setPdfFile(file);
     setParsing(true);
     setPdfLoaded(false);
+    setParseError('');
 
     try {
-      // Dynamic import to keep it client-side only
       const { parsePdf } = await import('@/lib/parse-pdf-client');
       const result = await parsePdf(file);
+
+      console.log('PDF parse result:', result);
+      console.log('Raw text:', result.rawText);
 
       // Auto-fill project name
       if (result.projectName) {
         setName(result.projectName);
       }
 
-      // Auto-fill items
+      // Auto-fill items with deadline from PDF
       if (result.items.length > 0) {
         setItems(
           result.items.map((item) => ({
             name: item.name,
-            deadline: '',
+            deadline: result.deadline || '',
           }))
         );
       } else {
-        // PDF parsed but no items found - let user add manually
-        setItems([{ name: '', deadline: '' }]);
+        // No items found - show raw text for debugging and add empty row
+        setParseError(
+          `明細を自動検出できませんでした。手動で追加してください。`
+        );
+        setItems([{ name: '', deadline: result.deadline || '' }]);
       }
 
       setPdfLoaded(true);
     } catch (err) {
       console.error('PDF parse error:', err);
-      alert('PDFの読み取りに失敗しました。明細を手動で入力してください。');
-      // Still allow manual input
+      setParseError('PDFの読み取りに失敗しました。手動で入力してください。');
       setItems([{ name: '', deadline: '' }]);
       setPdfLoaded(true);
     } finally {
@@ -84,7 +90,10 @@ export default function NewProjectPage() {
     setItems(items.filter((_, i) => i !== index));
   };
 
-  const addItem = () => setItems([...items, { name: '', deadline: '' }]);
+  const addItem = () => {
+    const lastDeadline = items.length > 0 ? items[items.length - 1].deadline : '';
+    setItems([...items, { name: '', deadline: lastDeadline }]);
+  };
 
   const updateItem = (index: number, field: keyof ItemInput, value: string) => {
     const updated = [...items];
@@ -99,29 +108,44 @@ export default function NewProjectPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!user || saving) return;
-    if (!name.trim() || !assigneeId || !pdfFile) return;
+    if (!name.trim()) {
+      alert('案件名を入力してください');
+      return;
+    }
+    if (!assigneeId) {
+      alert('担当者を選択してください');
+      return;
+    }
 
     const validItems = items.filter((i) => i.name.trim() && i.deadline);
     if (validItems.length === 0) {
-      alert('明細の期限を設定してください');
+      alert('明細を1つ以上入力し、期限を設定してください');
       return;
     }
 
     setSaving(true);
 
     try {
-      // Upload PDF to Supabase Storage
+      // Upload PDF to Supabase Storage (optional - don't fail if it doesn't work)
       let pdfUrl: string | null = null;
-      const fileName = `${Date.now()}_${pdfFile.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from('estimates')
-        .upload(fileName, pdfFile);
+      if (pdfFile) {
+        try {
+          const fileName = `${Date.now()}_${pdfFile.name}`;
+          const { error: uploadError } = await supabase.storage
+            .from('estimates')
+            .upload(fileName, pdfFile);
 
-      if (!uploadError) {
-        const { data: urlData } = supabase.storage
-          .from('estimates')
-          .getPublicUrl(fileName);
-        pdfUrl = urlData.publicUrl;
+          if (!uploadError) {
+            const { data: urlData } = supabase.storage
+              .from('estimates')
+              .getPublicUrl(fileName);
+            pdfUrl = urlData.publicUrl;
+          } else {
+            console.warn('PDF upload failed, continuing without:', uploadError);
+          }
+        } catch (storageErr) {
+          console.warn('Storage error, continuing without PDF:', storageErr);
+        }
       }
 
       // Create project
@@ -137,7 +161,10 @@ export default function NewProjectPage() {
         .select()
         .single();
 
-      if (projectError || !project) throw projectError;
+      if (projectError || !project) {
+        console.error('Project create error:', projectError);
+        throw new Error(`案件作成に失敗: ${projectError?.message}`);
+      }
 
       // Create items and checks
       for (const item of validItems) {
@@ -151,14 +178,17 @@ export default function NewProjectPage() {
           .select()
           .single();
 
-        if (itemError || !newItem) throw itemError;
+        if (itemError || !newItem) {
+          console.error('Item create error:', itemError);
+          throw new Error(`明細作成に失敗: ${itemError?.message}`);
+        }
         await createChecksForItem(newItem.id);
       }
 
       router.push(`/projects/${project.id}`);
     } catch (err) {
       console.error('Failed to create project:', err);
-      alert('登録に失敗しました');
+      alert(err instanceof Error ? err.message : '登録に失敗しました');
     } finally {
       setSaving(false);
     }
@@ -177,10 +207,10 @@ export default function NewProjectPage() {
         {/* STEP 1: PDF upload */}
         <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
           <label className="block text-sm font-bold text-blue-800 mb-2">
-            STEP 1：見積PDFをアップロード
+            見積PDFをアップロード
           </label>
           <p className="text-xs text-blue-600 mb-3">
-            PDFから案件名と明細を自動で読み取ります
+            案件名・明細・期限を自動で読み取ります
           </p>
           <input
             type="file"
@@ -196,21 +226,23 @@ export default function NewProjectPage() {
               PDFを解析中...
             </div>
           )}
-          {pdfLoaded && (
+          {pdfLoaded && !parseError && (
             <div className="mt-3 text-sm text-green-600 font-medium">
               読み取り完了（{items.length}件の明細を検出）
             </div>
           )}
+          {parseError && (
+            <div className="mt-3 text-sm text-orange-600 font-medium">
+              {parseError}
+            </div>
+          )}
         </div>
 
-        {/* STEP 2: Only shown after PDF upload */}
+        {/* Show form after PDF upload */}
         {pdfLoaded && (
           <>
             {/* Project name */}
             <div>
-              <label className="block text-sm font-bold text-gray-700 mb-1">
-                STEP 2：案件情報を確認
-              </label>
               <label className="block text-xs text-gray-500 mb-1">案件名</label>
               <input
                 type="text"
@@ -257,14 +289,14 @@ export default function NewProjectPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-sm font-bold text-gray-700">
-                  STEP 3：明細の確認・期限設定（{items.length}件）
+                  明細（{items.length}件）
                 </label>
               </div>
 
               {/* Bulk deadline setter */}
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-yellow-800 font-medium">一括期限設定：</span>
+                  <span className="text-sm text-yellow-800 font-medium whitespace-nowrap">一括期限：</span>
                   <input
                     type="date"
                     onChange={(e) => {
@@ -275,13 +307,15 @@ export default function NewProjectPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2 max-h-96 overflow-y-auto">
                 {items.map((item, i) => (
                   <div key={i} className="bg-white border border-gray-200 rounded-lg p-3">
                     <div className="flex items-start gap-2">
+                      <span className="text-xs text-gray-400 mt-2 w-6">{i + 1}</span>
                       <div className="flex-1 space-y-2">
                         <input
                           type="text"
+                          placeholder="明細名"
                           value={item.name}
                           onChange={(e) => updateItem(i, 'name', e.target.value)}
                           className="w-full py-1.5 px-2 border border-gray-200 rounded text-sm"
@@ -318,7 +352,7 @@ export default function NewProjectPage() {
             {/* Submit */}
             <button
               type="submit"
-              disabled={saving || !assigneeId || items.length === 0}
+              disabled={saving}
               className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold text-base disabled:opacity-50"
             >
               {saving ? '登録中...' : '登録する'}
