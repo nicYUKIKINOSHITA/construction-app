@@ -18,6 +18,7 @@ export default function NewProjectPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [saving, setSaving] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [pdfLoaded, setPdfLoaded] = useState(false);
 
   const [name, setName] = useState('');
   const [assigneeId, setAssigneeId] = useState('');
@@ -42,39 +43,38 @@ export default function NewProjectPage() {
   async function handlePdfUpload(file: File) {
     setPdfFile(file);
     setParsing(true);
+    setPdfLoaded(false);
 
     try {
-      const formData = new FormData();
-      formData.append('pdf', file);
-
-      const res = await fetch('/api/parse-pdf', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!res.ok) throw new Error('Parse failed');
-
-      const data = await res.json();
+      // Dynamic import to keep it client-side only
+      const { parsePdf } = await import('@/lib/parse-pdf-client');
+      const result = await parsePdf(file);
 
       // Auto-fill project name
-      if (data.projectName) {
-        setName(data.projectName);
+      if (result.projectName) {
+        setName(result.projectName);
       }
 
       // Auto-fill items
-      if (data.items && data.items.length > 0) {
+      if (result.items.length > 0) {
         setItems(
-          data.items.map((item: { name: string; spec?: string; quantity?: string; unit?: string }) => ({
-            name: item.spec
-              ? `${item.name} ${item.spec} ${item.quantity || ''}${item.unit || ''}`.trim()
-              : `${item.name} ${item.quantity || ''}${item.unit || ''}`.trim(),
+          result.items.map((item) => ({
+            name: item.name,
             deadline: '',
           }))
         );
+      } else {
+        // PDF parsed but no items found - let user add manually
+        setItems([{ name: '', deadline: '' }]);
       }
+
+      setPdfLoaded(true);
     } catch (err) {
       console.error('PDF parse error:', err);
       alert('PDFの読み取りに失敗しました。明細を手動で入力してください。');
+      // Still allow manual input
+      setItems([{ name: '', deadline: '' }]);
+      setPdfLoaded(true);
     } finally {
       setParsing(false);
     }
@@ -92,7 +92,6 @@ export default function NewProjectPage() {
     setItems(updated);
   };
 
-  // Set all deadlines at once
   const setAllDeadlines = (deadline: string) => {
     setItems(items.map((item) => ({ ...item, deadline })));
   };
@@ -100,31 +99,29 @@ export default function NewProjectPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!user || saving) return;
-    if (!name.trim() || !assigneeId) return;
+    if (!name.trim() || !assigneeId || !pdfFile) return;
 
     const validItems = items.filter((i) => i.name.trim() && i.deadline);
     if (validItems.length === 0) {
-      alert('明細が入力されていません');
+      alert('明細の期限を設定してください');
       return;
     }
 
     setSaving(true);
 
     try {
-      // Upload PDF
+      // Upload PDF to Supabase Storage
       let pdfUrl: string | null = null;
-      if (pdfFile) {
-        const fileName = `${Date.now()}_${pdfFile.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from('estimates')
-          .upload(fileName, pdfFile);
+      const fileName = `${Date.now()}_${pdfFile.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('estimates')
+        .upload(fileName, pdfFile);
 
-        if (!uploadError) {
-          const { data: urlData } = supabase.storage
-            .from('estimates')
-            .getPublicUrl(fileName);
-          pdfUrl = urlData.publicUrl;
-        }
+      if (!uploadError) {
+        const { data: urlData } = supabase.storage
+          .from('estimates')
+          .getPublicUrl(fileName);
+        pdfUrl = urlData.publicUrl;
       }
 
       // Create project
@@ -177,11 +174,14 @@ export default function NewProjectPage() {
       </header>
 
       <form onSubmit={handleSubmit} className="p-4 space-y-5">
-        {/* PDF upload - FIRST */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            見積PDF（アップロードで案件名・明細を自動取得）
+        {/* STEP 1: PDF upload */}
+        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+          <label className="block text-sm font-bold text-blue-800 mb-2">
+            STEP 1：見積PDFをアップロード
           </label>
+          <p className="text-xs text-blue-600 mb-3">
+            PDFから案件名と明細を自動で読み取ります
+          </p>
           <input
             type="file"
             accept=".pdf"
@@ -192,123 +192,139 @@ export default function NewProjectPage() {
             className="w-full text-sm"
           />
           {parsing && (
-            <div className="mt-2 text-sm text-blue-600 animate-pulse">
+            <div className="mt-3 text-sm text-blue-600 animate-pulse font-medium">
               PDFを解析中...
+            </div>
+          )}
+          {pdfLoaded && (
+            <div className="mt-3 text-sm text-green-600 font-medium">
+              読み取り完了（{items.length}件の明細を検出）
             </div>
           )}
         </div>
 
-        {/* Project name (auto-filled) */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">案件名</label>
-          <input
-            type="text"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="PDFアップロードで自動入力"
-            className="w-full py-3 px-4 border border-gray-200 rounded-xl text-sm"
-          />
-        </div>
-
-        {/* Assignee */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">担当者</label>
-          <select
-            required
-            value={assigneeId}
-            onChange={(e) => setAssigneeId(e.target.value)}
-            className="w-full py-3 px-4 border border-gray-200 rounded-xl text-sm bg-white"
-          >
-            <option value="">選択してください</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Notification days */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">通知（期限の何日前）</label>
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min={1}
-              max={30}
-              value={notifyDays}
-              onChange={(e) => setNotifyDays(Number(e.target.value))}
-              className="w-20 py-3 px-4 border border-gray-200 rounded-xl text-sm text-center"
-            />
-            <span className="text-sm text-gray-600">日前</span>
-          </div>
-        </div>
-
-        {/* Items (auto-filled from PDF) */}
-        {items.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700">
-                明細（{items.length}件）
+        {/* STEP 2: Only shown after PDF upload */}
+        {pdfLoaded && (
+          <>
+            {/* Project name */}
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">
+                STEP 2：案件情報を確認
               </label>
-              {/* Bulk deadline setter */}
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-gray-500">一括期限：</span>
+              <label className="block text-xs text-gray-500 mb-1">案件名</label>
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full py-3 px-4 border border-gray-200 rounded-xl text-sm"
+              />
+            </div>
+
+            {/* Assignee */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">担当者</label>
+              <select
+                required
+                value={assigneeId}
+                onChange={(e) => setAssigneeId(e.target.value)}
+                className="w-full py-3 px-4 border border-gray-200 rounded-xl text-sm bg-white"
+              >
+                <option value="">選択してください</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Notification days */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">通知（期限の何日前）</label>
+              <div className="flex items-center gap-2">
                 <input
-                  type="date"
-                  onChange={(e) => {
-                    if (e.target.value) setAllDeadlines(e.target.value);
-                  }}
-                  className="py-1 px-2 border border-gray-200 rounded-lg text-xs"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={notifyDays}
+                  onChange={(e) => setNotifyDays(Number(e.target.value))}
+                  className="w-20 py-3 px-4 border border-gray-200 rounded-xl text-sm text-center"
                 />
+                <span className="text-sm text-gray-600">日前</span>
               </div>
             </div>
-            <div className="space-y-2">
-              {items.map((item, i) => (
-                <div key={i} className="bg-white border border-gray-200 rounded-lg p-3">
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1 space-y-2">
-                      <input
-                        type="text"
-                        value={item.name}
-                        onChange={(e) => updateItem(i, 'name', e.target.value)}
-                        className="w-full py-1.5 px-2 border border-gray-200 rounded text-sm"
-                      />
-                      <input
-                        type="date"
-                        value={item.deadline}
-                        onChange={(e) => updateItem(i, 'deadline', e.target.value)}
-                        className="w-full py-1.5 px-2 border border-gray-200 rounded text-sm"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeItem(i)}
-                      className="text-red-400 text-lg px-1 mt-1"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={addItem}
-              className="mt-2 w-full py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-500 active:bg-gray-50"
-            >
-              ＋ 明細追加
-            </button>
-          </div>
-        )}
 
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={saving || parsing || items.length === 0}
-          className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold text-base disabled:opacity-50"
-        >
-          {saving ? '登録中...' : '登録する'}
-        </button>
+            {/* Items */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-bold text-gray-700">
+                  STEP 3：明細の確認・期限設定（{items.length}件）
+                </label>
+              </div>
+
+              {/* Bulk deadline setter */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-yellow-800 font-medium">一括期限設定：</span>
+                  <input
+                    type="date"
+                    onChange={(e) => {
+                      if (e.target.value) setAllDeadlines(e.target.value);
+                    }}
+                    className="flex-1 py-2 px-3 border border-yellow-300 rounded-lg text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {items.map((item, i) => (
+                  <div key={i} className="bg-white border border-gray-200 rounded-lg p-3">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 space-y-2">
+                        <input
+                          type="text"
+                          value={item.name}
+                          onChange={(e) => updateItem(i, 'name', e.target.value)}
+                          className="w-full py-1.5 px-2 border border-gray-200 rounded text-sm"
+                        />
+                        <input
+                          type="date"
+                          value={item.deadline}
+                          onChange={(e) => updateItem(i, 'deadline', e.target.value)}
+                          className={`w-full py-1.5 px-2 border rounded text-sm ${
+                            item.deadline ? 'border-gray-200' : 'border-red-300 bg-red-50'
+                          }`}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeItem(i)}
+                        className="text-red-400 text-lg px-1 mt-1"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={addItem}
+                className="mt-2 w-full py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-500 active:bg-gray-50"
+              >
+                ＋ 明細追加
+              </button>
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={saving || !assigneeId || items.length === 0}
+              className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold text-base disabled:opacity-50"
+            >
+              {saving ? '登録中...' : '登録する'}
+            </button>
+          </>
+        )}
       </form>
     </div>
   );
