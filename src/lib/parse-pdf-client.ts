@@ -124,19 +124,17 @@ export async function parsePdf(file: File): Promise<ParsedEstimate> {
   }
   const text = chunks.join(' ');
 
-  // Step 2: Project name
+  // Step 2: Project name — 「工事名」から現場名（〜工事）だけ抽出
   let projectName = '';
   const pnM = text.match(
-    /工\s*事\s*名[：:\s]*(.+?)(?=\s*(?:工\s*期|納\s*期|見\s*積\s*件\s*名|御見積|合\s*計|摘\s*要|番\s*号|PJ))/,
+    /工\s*事\s*名[：:\s]*(.+?)(?=\s*(?:見\s*積\s*有効|工\s*期|納\s*期|見\s*積\s*件\s*名|御見積|合\s*計|摘\s*要|番\s*号|PJ|（株）|\(株\)|【))/,
   );
-  if (pnM) projectName = pnM[1].replace(/\s+/g, ' ').trim();
-
-  const knM = text.match(
-    /見\s*積\s*件\s*名[：:\s]*(.+?)(?=\s*(?:工\s*期|納\s*期|御見積|合\s*計|摘\s*要|番\s*号|PJ|数\s*量|見\s*積\s*額))/,
-  );
-  if (knM) {
-    const kn = knM[1].replace(/\s+/g, ' ').trim();
-    projectName = projectName ? `${projectName} ${kn}` : kn;
+  if (pnM) {
+    let raw = pnM[1].replace(/\s+/g, ' ').trim();
+    // 「〜工事」で終わるところまでを現場名とする
+    const kojiEnd = raw.match(/^(.+?工事)/);
+    if (kojiEnd) raw = kojiEnd[1];
+    projectName = raw;
   }
 
   // Step 3: Deadline — last YYYY年MM月DD日

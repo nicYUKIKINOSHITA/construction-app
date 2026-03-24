@@ -20,6 +20,25 @@ export default function ProjectsPage() {
       return;
     }
     loadProjects();
+
+    // Realtime: 変更があったら自動リロード
+    const channel = supabase
+      .channel('projects-list')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => {
+        loadProjects();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'checks' }, () => {
+        loadProjects();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, () => {
+        loadProjects();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, router]);
 
   async function loadProjects() {

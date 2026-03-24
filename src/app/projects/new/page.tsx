@@ -32,6 +32,9 @@ export default function NewProjectPage() {
       router.replace('/');
       return;
     }
+    // 担当者をログイン中のユーザーで自動設定
+    setAssigneeId(user.id);
+
     supabase
       .from('users')
       .select('*')
@@ -52,14 +55,11 @@ export default function NewProjectPage() {
       const result = await parsePdf(file);
 
       console.log('PDF parse result:', result);
-      console.log('Raw text:', result.rawText);
 
-      // Auto-fill project name
       if (result.projectName) {
         setName(result.projectName);
       }
 
-      // Auto-fill items with deadline from PDF
       if (result.items.length > 0) {
         setItems(
           result.items.map((item) => ({
@@ -68,10 +68,7 @@ export default function NewProjectPage() {
           }))
         );
       } else {
-        // No items found - show raw text for debugging and add empty row
-        setParseError(
-          `明細を自動検出できませんでした。手動で追加してください。`
-        );
+        setParseError('明細を自動検出できませんでした。手動で追加してください。');
         setItems([{ name: '', deadline: result.deadline || '' }]);
       }
 
@@ -101,10 +98,6 @@ export default function NewProjectPage() {
     setItems(updated);
   };
 
-  const setAllDeadlines = (deadline: string) => {
-    setItems(items.map((item) => ({ ...item, deadline })));
-  };
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!user || saving) return;
@@ -126,7 +119,6 @@ export default function NewProjectPage() {
     setSaving(true);
 
     try {
-      // Upload PDF to Supabase Storage (optional - don't fail if it doesn't work)
       let pdfUrl: string | null = null;
       if (pdfFile) {
         try {
@@ -140,15 +132,12 @@ export default function NewProjectPage() {
               .from('estimates')
               .getPublicUrl(fileName);
             pdfUrl = urlData.publicUrl;
-          } else {
-            console.warn('PDF upload failed, continuing without:', uploadError);
           }
         } catch (storageErr) {
-          console.warn('Storage error, continuing without PDF:', storageErr);
+          console.warn('Storage error:', storageErr);
         }
       }
 
-      // Create project
       const { data: project, error: projectError } = await supabase
         .from('projects')
         .insert({
@@ -162,11 +151,9 @@ export default function NewProjectPage() {
         .single();
 
       if (projectError || !project) {
-        console.error('Project create error:', projectError);
         throw new Error(`案件作成に失敗: ${projectError?.message}`);
       }
 
-      // Create items and checks
       for (const item of validItems) {
         const { data: newItem, error: itemError } = await supabase
           .from('items')
@@ -179,7 +166,6 @@ export default function NewProjectPage() {
           .single();
 
         if (itemError || !newItem) {
-          console.error('Item create error:', itemError);
           throw new Error(`明細作成に失敗: ${itemError?.message}`);
         }
         await createChecksForItem(newItem.id);
@@ -204,7 +190,7 @@ export default function NewProjectPage() {
       </header>
 
       <form onSubmit={handleSubmit} className="p-4 space-y-5">
-        {/* STEP 1: PDF upload */}
+        {/* PDF upload */}
         <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
           <label className="block text-sm font-bold text-blue-800 mb-2">
             見積PDFをアップロード
@@ -238,7 +224,6 @@ export default function NewProjectPage() {
           )}
         </div>
 
-        {/* Show form after PDF upload */}
         {pdfLoaded && (
           <>
             {/* Project name */}
@@ -253,7 +238,7 @@ export default function NewProjectPage() {
               />
             </div>
 
-            {/* Assignee */}
+            {/* Assignee - auto-filled with logged-in user */}
             <div>
               <label className="block text-xs text-gray-500 mb-1">担当者</label>
               <select
@@ -287,25 +272,9 @@ export default function NewProjectPage() {
 
             {/* Items */}
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-bold text-gray-700">
-                  明細（{items.length}件）
-                </label>
-              </div>
-
-              {/* Bulk deadline setter */}
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-yellow-800 font-medium whitespace-nowrap">一括期限：</span>
-                  <input
-                    type="date"
-                    onChange={(e) => {
-                      if (e.target.value) setAllDeadlines(e.target.value);
-                    }}
-                    className="flex-1 py-2 px-3 border border-yellow-300 rounded-lg text-sm"
-                  />
-                </div>
-              </div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">
+                明細（{items.length}件）
+              </label>
 
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {items.map((item, i) => (

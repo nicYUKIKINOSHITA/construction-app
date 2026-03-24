@@ -82,7 +82,25 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       return;
     }
     loadProject();
-  }, [user, router, loadProject]);
+
+    // Realtime: 誰かがチェック・明細・案件を更新したら自動リロード
+    const channel = supabase
+      .channel(`project-${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'checks' }, () => {
+        loadProject();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter: `project_id=eq.${id}` }, () => {
+        loadProject();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${id}` }, () => {
+        loadProject();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, router, loadProject, id]);
 
   // Calculate totals
   const totalChecks = items.reduce((sum, item) => sum + (item.checks?.length || 0), 0);
