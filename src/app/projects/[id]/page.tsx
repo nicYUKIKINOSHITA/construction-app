@@ -252,18 +252,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     setEditingItemDeadline(null);
   }
 
-  if (!user || loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-gray-400">読み込み中...</div>
-      </div>
-    );
-  }
+  if (!user) return null;
 
   if (!project) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-gray-400">案件が見つかりません</div>
+        <div className="text-gray-400">{loading ? '' : '案件が見つかりません'}</div>
       </div>
     );
   }

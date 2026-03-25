@@ -117,8 +117,8 @@ export default function ProjectsPage() {
           </div>
         )}
 
-        {loading ? (
-          <div className="text-center text-gray-400 py-12">読み込み中...</div>
+        {loading && projects.length === 0 ? (
+          <div className="text-center text-gray-400 py-12"></div>
         ) : projects.length === 0 && !error ? (
           <div className="text-center text-gray-400 py-12">
             <p>案件がありません</p>
