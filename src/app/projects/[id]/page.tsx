@@ -48,36 +48,31 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [tempItemDeadline, setTempItemDeadline] = useState('');
 
   const loadProject = useCallback(async () => {
-    const { data: proj } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('id', id)
-      .single();
+    // 全クエリを並列実行（4→1ラウンドトリップ）
+    const [projRes, usersRes, itemsRes] = await Promise.all([
+      supabase
+        .from('projects')
+        .select('*, users!projects_assignee_id_fkey(name)')
+        .eq('id', id)
+        .single(),
+      supabase.from('users').select('id, name').order('name'),
+      supabase
+        .from('items')
+        .select('*, checks(*)')
+        .eq('project_id', id)
+        .is('merged_into_id', null)
+        .order('deadline'),
+    ]);
 
-    if (!proj) return;
+    if (!projRes.data) return;
+
+    const proj = projRes.data;
+    const assigneeUser = proj.users as { name: string } | null;
+
     setProject(proj);
-
-    // Get assignee name
-    const { data: assignee } = await supabase
-      .from('users')
-      .select('name')
-      .eq('id', proj.assignee_id)
-      .single();
-    setAssigneeName(assignee?.name || '未割当');
-
-    // Get users for assignee change
-    const { data: users } = await supabase.from('users').select('*').order('name');
-    setAllUsers(users || []);
-
-    // Get items with checks
-    const { data: itemsData } = await supabase
-      .from('items')
-      .select('*, checks(*)')
-      .eq('project_id', id)
-      .is('merged_into_id', null)
-      .order('deadline');
-
-    setItems(itemsData || []);
+    setAssigneeName(assigneeUser?.name || '未割当');
+    setAllUsers(usersRes.data || []);
+    setItems(itemsRes.data || []);
     setLoading(false);
   }, [id]);
 

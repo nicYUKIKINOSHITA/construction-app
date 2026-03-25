@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useUser } from '@/components/UserContext';
@@ -37,66 +38,34 @@ export default function ProjectsPage() {
 
     const projectIds = projectsData.map((p: { id: string }) => p.id);
 
-    // 2. Fetch ALL items for ALL projects in ONE query
+    // 2. Fetch items with check counts in ONE query using join
     const { data: allItems } = await supabase
       .from('items')
-      .select('id, project_id, name, deadline')
+      .select('id, project_id, name, deadline, checks(checked)')
       .in('project_id', projectIds)
       .is('merged_into_id', null)
       .order('deadline');
 
-    const itemsByProject = new Map<string, typeof allItems>();
-    for (const item of allItems || []) {
-      const list = itemsByProject.get(item.project_id) || [];
-      list.push(item);
-      itemsByProject.set(item.project_id, list);
-    }
-
-    // 3. Fetch ALL checks for ALL items in ONE query (count only)
-    const allItemIds = (allItems || []).map((i) => i.id);
-    let checkCounts = new Map<string, { total: number; checked: number }>();
-
-    if (allItemIds.length > 0) {
-      const { data: allChecks } = await supabase
-        .from('checks')
-        .select('item_id, checked')
-        .in('item_id', allItemIds);
-
-      // Aggregate by project
-      const itemToProject = new Map<string, string>();
-      for (const item of allItems || []) {
-        itemToProject.set(item.id, item.project_id);
-      }
-
-      checkCounts = new Map();
-      for (const check of allChecks || []) {
-        const projId = itemToProject.get(check.item_id);
-        if (!projId) continue;
-        const counts = checkCounts.get(projId) || { total: 0, checked: 0 };
-        counts.total++;
-        if (check.checked) counts.checked++;
-        checkCounts.set(projId, counts);
-      }
-    }
-
-    // 4. Assemble results (pure JS, no more DB calls)
+    // 3. Aggregate counts from joined data (no extra query needed)
     const enriched: Project[] = projectsData.map((p: Record<string, unknown>) => {
-      const items = itemsByProject.get(p.id as string) || [];
-      const counts = checkCounts.get(p.id as string) || { total: 0, checked: 0 };
+      const projItems = (allItems || []).filter((i) => i.project_id === (p.id as string));
+      let totalChecks = 0;
+      let checkedChecks = 0;
+      for (const item of projItems) {
+        const checks = (item as unknown as { checks: { checked: boolean }[] }).checks || [];
+        totalChecks += checks.length;
+        checkedChecks += checks.filter((c) => c.checked).length;
+      }
       const users = p.users as { name: string } | null;
 
       return {
         ...p,
         assignee_name: users?.name || '未割当',
-        checked_count: counts.checked,
-        total_count: counts.total,
-        earliest_deadline: items[0]?.deadline || null,
-        urgent_items: items.slice(0, 3).map((item) => ({
-          name: item.name,
-          deadline: item.deadline,
-          unchecked_count: 0,
-        })),
-      } as Project;
+        checked_count: checkedChecks,
+        total_count: totalChecks,
+        earliest_deadline: projItems[0]?.deadline || null,
+        urgent_items: [],
+      } as unknown as Project;
     });
 
     setProjects(enriched);
@@ -171,13 +140,14 @@ export default function ProjectsPage() {
         )}
       </div>
 
-      <button
-        onClick={() => router.push('/projects/new')}
+      <Link
+        href="/projects/new"
         className="fixed bottom-20 right-4 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg text-2xl flex items-center justify-center active:bg-blue-700 z-40"
         aria-label="案件を追加"
+        prefetch={true}
       >
         +
-      </button>
+      </Link>
 
       <BottomNav />
     </div>
