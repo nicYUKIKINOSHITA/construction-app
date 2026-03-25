@@ -451,32 +451,30 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           const isEditingName = editingItemName === item.id;
           const isEditingDeadline = editingItemDeadline === item.id;
 
+          // 今日の日付と1年後
+          const todayStr = new Date().toISOString().split('T')[0];
+          const maxDate = new Date();
+          maxDate.setFullYear(maxDate.getFullYear() + 1);
+          const maxDateStr = maxDate.toISOString().split('T')[0];
+
           return (
-            <div key={item.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden relative">
-              {/* Badge: iPhone通知スタイル */}
-              {deadlineInfo.overdue && (
-                <div className="absolute -top-1 -right-1 z-10 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center shadow-md">
-                  {deadlineInfo.days}日超過
-                </div>
-              )}
-              {!deadlineInfo.overdue && deadlineInfo.color === 'red' && (
-                <div className="absolute -top-1 -right-1 z-10 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center shadow-md">
-                  {deadlineInfo.label}
-                </div>
-              )}
-              {!deadlineInfo.overdue && deadlineInfo.color === 'yellow' && (
-                <div className="absolute -top-1 -right-1 z-10 bg-yellow-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center shadow-md">
-                  {deadlineInfo.label}
+            <div key={item.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden relative mt-2">
+              {/* Badge: iPhone通知スタイル（枠内右上に収める） */}
+              {(deadlineInfo.overdue || deadlineInfo.color === 'red' || deadlineInfo.color === 'yellow') && (
+                <div className={`absolute top-2 right-2 z-10 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm ${
+                  deadlineInfo.overdue || deadlineInfo.color === 'red' ? 'bg-red-500' : 'bg-yellow-500'
+                }`}>
+                  {deadlineInfo.overdue ? `${deadlineInfo.days}日超過` : deadlineInfo.label}
                 </div>
               )}
 
-              {/* Item header */}
+              {/* Item header - タップでチェックリスト開閉 */}
               <button
                 onClick={() => setExpandedItem(isExpanded ? null : item.id)}
                 className="w-full text-left p-4 active:bg-gray-50"
               >
-                {/* Item name - タップで編集 */}
-                <div className="flex items-start justify-between mb-2">
+                {/* Item name + 鉛筆アイコン */}
+                <div className="flex items-start mb-2 pr-16">
                   {isEditingName ? (
                     <input
                       autoFocus
@@ -485,30 +483,33 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                       onBlur={() => updateItemName(item.id, tempItemName)}
                       onKeyDown={(e) => { if (e.key === 'Enter') updateItemName(item.id, tempItemName); }}
                       onClick={(e) => e.stopPropagation()}
-                      className="flex-1 text-sm font-bold border-b-2 border-blue-500 outline-none py-0.5 mr-2"
+                      className="flex-1 text-sm font-bold border-b-2 border-blue-500 outline-none py-0.5"
                     />
                   ) : (
-                    <span
-                      className="font-bold text-sm flex-1 mr-2"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingItemName(item.id);
-                        setTempItemName(item.name);
-                      }}
-                    >
-                      {item.name}
-                      <span className="text-[10px] text-gray-400 ml-1">✏️</span>
-                    </span>
+                    <>
+                      <span className="font-bold text-sm flex-1">{item.name}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingItemName(item.id);
+                          setTempItemName(item.name);
+                        }}
+                        className="ml-1 text-gray-400 active:text-blue-500 p-1 shrink-0"
+                      >
+                        <span className="text-xs">✏️</span>
+                      </button>
+                    </>
                   )}
                 </div>
 
                 {/* Deadline + Progress */}
                 <div className="flex items-center gap-2 mb-1">
-                  {/* 期限ボタン */}
                   {isEditingDeadline ? (
                     <input
                       type="date"
                       autoFocus
+                      min={todayStr}
+                      max={maxDateStr}
                       value={tempItemDeadline}
                       onChange={(e) => {
                         setTempItemDeadline(e.target.value);
