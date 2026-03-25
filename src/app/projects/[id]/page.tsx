@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, use } from 'react';
+import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { createChecksForItem } from '@/lib/checks';
@@ -76,6 +76,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     setLoading(false);
   }, [id]);
 
+  // Debounced realtime reload
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debouncedReload = useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => loadProject(), 500);
+  }, [loadProject]);
+
   useEffect(() => {
     if (!user) {
       router.replace('/');
@@ -83,24 +90,18 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     }
     loadProject();
 
-    // Realtime: 誰かがチェック・明細・案件を更新したら自動リロード
     const channel = supabase
       .channel(`project-${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'checks' }, () => {
-        loadProject();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter: `project_id=eq.${id}` }, () => {
-        loadProject();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${id}` }, () => {
-        loadProject();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'checks' }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items', filter: `project_id=eq.${id}` }, debouncedReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${id}` }, debouncedReload)
       .subscribe();
 
     return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
       supabase.removeChannel(channel);
     };
-  }, [user, router, loadProject, id]);
+  }, [user, router, loadProject, debouncedReload, id]);
 
   // Calculate totals
   const totalChecks = items.reduce((sum, item) => sum + (item.checks?.length || 0), 0);

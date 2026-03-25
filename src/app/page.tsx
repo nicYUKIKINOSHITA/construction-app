@@ -22,11 +22,11 @@ export default function LoginPage() {
       try {
         const { data, error: fetchError } = await supabase
           .from('users')
-          .select('*')
+          .select('id, name')
           .order('name');
         if (fetchError) {
-          console.error('Supabase error:', fetchError);
           setError(`接続エラー: ${fetchError.message}`);
+          return;
         }
         setUsers(data || []);
       } catch (err) {

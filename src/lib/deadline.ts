@@ -10,11 +10,14 @@ export interface DeadlineInfo {
 }
 
 export function getDeadlineInfo(deadline: string): DeadlineInfo {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  if (!deadline) {
+    return { days: 0, color: 'gray', label: '期限未設定', overdue: false };
+  }
   const deadlineDate = new Date(deadline);
-  deadlineDate.setHours(0, 0, 0, 0);
-  const days = differenceInCalendarDays(deadlineDate, today);
+  if (isNaN(deadlineDate.getTime())) {
+    return { days: 0, color: 'gray', label: '期限不明', overdue: false };
+  }
+  const days = differenceInCalendarDays(deadlineDate, new Date());
 
   if (days < 0) {
     return { days: Math.abs(days), color: 'red', label: `${Math.abs(days)}日超過`, overdue: true };

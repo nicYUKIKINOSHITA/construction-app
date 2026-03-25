@@ -54,8 +54,6 @@ export default function NewProjectPage() {
       const { parsePdf } = await import('@/lib/parse-pdf-client');
       const result = await parsePdf(file);
 
-      console.log('PDF parse result:', result);
-
       if (result.projectName) {
         setName(result.projectName);
       }
@@ -154,22 +152,24 @@ export default function NewProjectPage() {
         throw new Error(`案件作成に失敗: ${projectError?.message}`);
       }
 
-      for (const item of validItems) {
-        const { data: newItem, error: itemError } = await supabase
-          .from('items')
-          .insert({
+      // Batch insert all items at once
+      const { data: newItems, error: itemError } = await supabase
+        .from('items')
+        .insert(
+          validItems.map((item) => ({
             project_id: project.id,
             name: item.name.trim(),
             deadline: item.deadline,
-          })
-          .select()
-          .single();
+          }))
+        )
+        .select();
 
-        if (itemError || !newItem) {
-          throw new Error(`明細作成に失敗: ${itemError?.message}`);
-        }
-        await createChecksForItem(newItem.id);
+      if (itemError || !newItems) {
+        throw new Error(`明細作成に失敗: ${itemError?.message}`);
       }
+
+      // Create checks for all items
+      await Promise.all(newItems.map((item) => createChecksForItem(item.id)));
 
       router.push(`/projects/${project.id}`);
     } catch (err) {

@@ -31,5 +31,5 @@ export const STOP_REASONS = [
   '社内確認中',
 ] as const;
 
-// Total checks per item: steps 1-11 (11) + step 12 sub-steps (6) = 17
-export const CHECKS_PER_ITEM = 17;
+// Total checks per item: steps 1-11 + step 12 sub-steps
+export const CHECKS_PER_ITEM = (WORKFLOW_STEPS.length - 1) + SUB_STEPS_12.length;
