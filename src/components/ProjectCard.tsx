@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import DeadlineBadge from './DeadlineBadge';
+import { getDeadlineInfo } from '@/lib/deadline';
 
 interface ProjectCardProps {
   id: string;
@@ -25,7 +25,6 @@ export default function ProjectCard({
   checkedCount,
   totalCount,
   earliestDeadline,
-  urgentItems,
 }: ProjectCardProps) {
   const progress = totalCount > 0 ? Math.round((checkedCount / totalCount) * 100) : 0;
 
@@ -33,47 +32,38 @@ export default function ProjectCard({
   if (progress >= 80) progressColor = 'bg-green-500';
   else if (progress >= 30) progressColor = 'bg-yellow-500';
 
+  // Badge info
+  const deadlineInfo = earliestDeadline ? getDeadlineInfo(earliestDeadline) : null;
+  const showBadge = deadlineInfo && (deadlineInfo.overdue || deadlineInfo.color === 'red' || deadlineInfo.color === 'yellow');
+
   return (
     <Link href={`/projects/${id}`} className="block">
-      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm active:bg-gray-50 transition-colors">
-        <div className="flex items-start justify-between mb-2">
-          <div className="flex-1 min-w-0">
-            <h3 className="font-bold text-base truncate">{name}</h3>
-            <p className="text-sm text-gray-500">担当：{assigneeName}</p>
+      <div className="bg-white rounded-lg border border-gray-200 px-3 py-2 shadow-sm active:bg-gray-50 transition-colors relative">
+        {/* Badge */}
+        {showBadge && (
+          <div className={`absolute top-1 right-2 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+            deadlineInfo.overdue || deadlineInfo.color === 'red' ? 'bg-red-500' : 'bg-yellow-500'
+          }`}>
+            {deadlineInfo.overdue ? `${deadlineInfo.days}日超過` : deadlineInfo.label}
           </div>
-          {earliestDeadline && <DeadlineBadge deadline={earliestDeadline} />}
+        )}
+
+        {/* 1行目: 案件名 + 担当 + 進捗 */}
+        <div className="flex items-center gap-2 pr-16">
+          <h3 className="font-bold text-sm truncate flex-1">{name}</h3>
+          <span className="text-[11px] text-gray-400 shrink-0">{assigneeName}</span>
         </div>
 
-        {/* Progress bar */}
-        <div className="mb-2">
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
-            <span>進捗</span>
-            <span>{checkedCount}/{totalCount}（{progress}%）</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
+        {/* 2行目: プログレスバー */}
+        <div className="flex items-center gap-2 mt-1">
+          <div className="flex-1 bg-gray-200 rounded-full h-1.5">
             <div
-              className={`h-2 rounded-full transition-all ${progressColor}`}
+              className={`h-1.5 rounded-full transition-all ${progressColor}`}
               style={{ width: `${progress}%` }}
             />
           </div>
+          <span className="text-[11px] text-gray-400 shrink-0 w-16 text-right">{checkedCount}/{totalCount} ({progress}%)</span>
         </div>
-
-        {/* Urgent items */}
-        {urgentItems.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {urgentItems.slice(0, 3).map((item, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs">
-                <DeadlineBadge deadline={item.deadline} />
-                <span className="truncate text-gray-700">{item.name}</span>
-                {item.stop_reason && (
-                  <span className="shrink-0 px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded text-[10px]">
-                    {item.stop_reason}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </Link>
   );

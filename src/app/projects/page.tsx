@@ -136,11 +136,11 @@ export default function ProjectsPage() {
 
   return (
     <div className="pb-20">
-      <header className="sticky top-0 bg-blue-600 text-white px-4 py-3 z-40">
-        <h1 className="text-lg font-bold">案件一覧</h1>
+      <header className="sticky top-0 bg-blue-600 text-white px-3 py-2 z-40">
+        <h1 className="text-base font-bold">案件一覧</h1>
       </header>
 
-      <div className="p-4 space-y-3">
+      <div className="p-2 space-y-1.5">
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
             {error}
