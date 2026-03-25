@@ -7,6 +7,7 @@ import { createChecksForItem } from '@/lib/checks';
 import { useUser } from '@/components/UserContext';
 import BottomNav from '@/components/BottomNav';
 import DeadlineBadge from '@/components/DeadlineBadge';
+import { getDeadlineInfo } from '@/lib/deadline';
 import StopReasonPicker from '@/components/StopReasonPicker';
 import ItemMergeDialog from '@/components/ItemMergeDialog';
 import { WORKFLOW_STEPS, SUB_STEPS_12, CHECKS_PER_ITEM } from '@/lib/constants';
@@ -41,6 +42,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [editingNotify, setEditingNotify] = useState(false);
   const [editingAssignee, setEditingAssignee] = useState(false);
   const [sub12Expanded, setSub12Expanded] = useState<string | null>(null);
+  const [editingItemName, setEditingItemName] = useState<string | null>(null);
+  const [editingItemDeadline, setEditingItemDeadline] = useState<string | null>(null);
+  const [tempItemName, setTempItemName] = useState('');
+  const [tempItemDeadline, setTempItemDeadline] = useState('');
 
   const loadProject = useCallback(async () => {
     const { data: proj } = await supabase
@@ -238,6 +243,20 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     setEditingAssignee(false);
   }
 
+  async function updateItemName(itemId: string, newName: string) {
+    if (!newName.trim()) return;
+    await supabase.from('items').update({ name: newName.trim() }).eq('id', itemId);
+    setItems(items.map((i) => i.id === itemId ? { ...i, name: newName.trim() } : i));
+    setEditingItemName(null);
+  }
+
+  async function updateItemDeadline(itemId: string, newDeadline: string) {
+    if (!newDeadline) return;
+    await supabase.from('items').update({ deadline: newDeadline }).eq('id', itemId);
+    setItems(items.map((i) => i.id === itemId ? { ...i, deadline: newDeadline } : i));
+    setEditingItemDeadline(null);
+  }
+
   if (!user || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -422,17 +441,102 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           const step12CheckedCount = step12Checks.filter((c) => c.checked).length;
           const is12Expanded = sub12Expanded === item.id;
 
+          const deadlineInfo = (() => {
+            try {
+              return getDeadlineInfo(item.deadline);
+            } catch {
+              return { days: 0, color: 'gray' as const, label: '期限未設定', overdue: false };
+            }
+          })();
+          const isEditingName = editingItemName === item.id;
+          const isEditingDeadline = editingItemDeadline === item.id;
+
           return (
-            <div key={item.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div key={item.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden relative">
+              {/* Badge: iPhone通知スタイル */}
+              {deadlineInfo.overdue && (
+                <div className="absolute -top-1 -right-1 z-10 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center shadow-md">
+                  {deadlineInfo.days}日超過
+                </div>
+              )}
+              {!deadlineInfo.overdue && deadlineInfo.color === 'red' && (
+                <div className="absolute -top-1 -right-1 z-10 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center shadow-md">
+                  {deadlineInfo.label}
+                </div>
+              )}
+              {!deadlineInfo.overdue && deadlineInfo.color === 'yellow' && (
+                <div className="absolute -top-1 -right-1 z-10 bg-yellow-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center shadow-md">
+                  {deadlineInfo.label}
+                </div>
+              )}
+
               {/* Item header */}
               <button
                 onClick={() => setExpandedItem(isExpanded ? null : item.id)}
                 className="w-full text-left p-4 active:bg-gray-50"
               >
-                <div className="flex items-start justify-between mb-1">
-                  <span className="font-bold text-sm flex-1">{item.name}</span>
-                  <DeadlineBadge deadline={item.deadline} />
+                {/* Item name - タップで編集 */}
+                <div className="flex items-start justify-between mb-2">
+                  {isEditingName ? (
+                    <input
+                      autoFocus
+                      value={tempItemName}
+                      onChange={(e) => setTempItemName(e.target.value)}
+                      onBlur={() => updateItemName(item.id, tempItemName)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') updateItemName(item.id, tempItemName); }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex-1 text-sm font-bold border-b-2 border-blue-500 outline-none py-0.5 mr-2"
+                    />
+                  ) : (
+                    <span
+                      className="font-bold text-sm flex-1 mr-2"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingItemName(item.id);
+                        setTempItemName(item.name);
+                      }}
+                    >
+                      {item.name}
+                      <span className="text-[10px] text-gray-400 ml-1">✏️</span>
+                    </span>
+                  )}
                 </div>
+
+                {/* Deadline + Progress */}
+                <div className="flex items-center gap-2 mb-1">
+                  {/* 期限ボタン */}
+                  {isEditingDeadline ? (
+                    <input
+                      type="date"
+                      autoFocus
+                      value={tempItemDeadline}
+                      onChange={(e) => {
+                        setTempItemDeadline(e.target.value);
+                        updateItemDeadline(item.id, e.target.value);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-xs border border-blue-400 rounded px-2 py-1"
+                    />
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingItemDeadline(item.id);
+                        setTempItemDeadline(item.deadline);
+                      }}
+                      className={`text-xs px-2 py-1 rounded border ${
+                        item.deadline ? 'border-gray-200 text-gray-600' : 'border-red-300 text-red-500 bg-red-50'
+                      }`}
+                    >
+                      {item.deadline ? `期限: ${new Date(item.deadline).toLocaleDateString('ja-JP')}` : '期限を設定'}
+                    </button>
+                  )}
+                  <span className="text-xs text-gray-400">
+                    {!deadlineInfo.overdue && deadlineInfo.color === 'gray' && deadlineInfo.label}
+                    {!deadlineInfo.overdue && deadlineInfo.color === 'green' && deadlineInfo.label}
+                  </span>
+                </div>
+
                 <div className="flex items-center gap-2">
                   <div className="flex-1 bg-gray-200 rounded-full h-1.5">
                     <div
@@ -445,7 +549,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   <span className="text-xs text-gray-500 shrink-0">{itemChecked}/{itemTotal}</span>
                   <span className="text-xs text-gray-400">{isExpanded ? '▲' : '▼'}</span>
                 </div>
-                {/* Show stop reasons summary when collapsed */}
+
+                {/* Stop reasons summary */}
                 {!isExpanded && itemChecks.some((c) => c.stop_reason) && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {itemChecks
