@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { differenceInCalendarDays } from 'date-fns';
+import nodemailer from 'nodemailer';
 
 function getSupabase() {
   return createClient(
@@ -14,7 +15,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const supabase = getSupabase();
 
-  // Simple auth check
+  // Auth check
   const authHeader = request.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Get all projects with their settings
+  // Get all projects
   const { data: projects } = await supabase
     .from('projects')
     .select('*, users!projects_assignee_id_fkey(name)');
@@ -60,66 +61,68 @@ export async function GET(request: NextRequest) {
 
         if (count && count > 0) {
           const label = daysLeft < 0
-            ? `${Math.abs(daysLeft)}日超過`
+            ? `⚠️ ${Math.abs(daysLeft)}日超過`
             : daysLeft === 0
-            ? '本日期限'
+            ? '⚠️ 本日期限'
             : `あと${daysLeft}日`;
 
-          urgentItems.push(`  ${item.name}：${label}（未完了${count}件）`);
+          urgentItems.push(`  ・${item.name}：${label}（未完了${count}件）`);
         }
       }
     }
 
     if (urgentItems.length > 0) {
       const assigneeName = (project.users as { name: string } | null)?.name || '未割当';
-      const msg = `【施工管理】${project.name}（担当：${assigneeName}）\n${urgentItems.join('\n')}`;
+      const msg = `■ ${project.name}（担当：${assigneeName}）\n${urgentItems.join('\n')}`;
       notifications.push(msg);
     }
   }
 
-  // Send LINE Notify
-  const lineToken = process.env.LINE_NOTIFY_TOKEN;
-  if (lineToken && notifications.length > 0) {
-    const message = '\n' + notifications.join('\n\n');
-    try {
-      await fetch('https://notify-api.line.me/api/notify', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${lineToken}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({ message }),
-      });
-    } catch (err) {
-      console.error('LINE Notify error:', err);
-    }
+  if (notifications.length === 0) {
+    return NextResponse.json({ message: 'No urgent items', sent: 0 });
   }
 
-  // Send email via Resend
-  const resendKey = process.env.RESEND_API_KEY;
+  // Send email via Gmail SMTP
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPass = process.env.GMAIL_APP_PASSWORD;
   const emailTo = process.env.NOTIFICATION_EMAIL_TO;
-  if (resendKey && emailTo && notifications.length > 0) {
+
+  let emailResult = 'skipped';
+
+  if (gmailUser && gmailPass && emailTo) {
     try {
-      await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${resendKey}`,
-          'Content-Type': 'application/json',
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: gmailUser,
+          pass: gmailPass,
         },
-        body: JSON.stringify({
-          from: 'noreply@resend.dev',
-          to: emailTo.split(','),
-          subject: `【施工管理】期限通知（${notifications.length}件）`,
-          text: notifications.join('\n\n'),
-        }),
       });
+
+      const emailBody = `施工管理チェックアプリからの自動通知です。\n\n`
+        + `以下の案件で期限が迫っている、または超過している明細があります。\n\n`
+        + notifications.join('\n\n')
+        + `\n\n──────────────\n`
+        + `アプリで確認: https://construction-app-kohl.vercel.app/projects\n`
+        + `※このメールは自動送信です`;
+
+      await transporter.sendMail({
+        from: `施工管理チェック <${gmailUser}>`,
+        to: emailTo,
+        subject: `【施工管理】期限通知 ${notifications.length}件の案件に注意`,
+        text: emailBody,
+      });
+
+      emailResult = `sent to ${emailTo.split(',').length} addresses`;
     } catch (err) {
-      console.error('Email error:', err);
+      console.error('Gmail send error:', err);
+      emailResult = `error: ${err instanceof Error ? err.message : 'unknown'}`;
     }
   }
 
   return NextResponse.json({
     sent: notifications.length,
+    email: emailResult,
     notifications,
   });
 }
