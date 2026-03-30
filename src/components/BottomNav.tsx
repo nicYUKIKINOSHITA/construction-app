@@ -2,11 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useUser } from '@/components/UserContext';
 
 export default function BottomNav() {
   const pathname = usePathname();
-  const { user, logout } = useUser();
 
   const tabs = [
     { href: '/projects', label: '案件一覧', icon: '📋' },
@@ -31,15 +29,7 @@ export default function BottomNav() {
             </Link>
           );
         })}
-        <button
-          onClick={logout}
-          className="flex-1 flex flex-col items-center py-2 text-xs text-gray-400"
-        >
-          <span className="text-lg mb-0.5">👤</span>
-          {user?.name || '---'}
-        </button>
       </div>
-      {/* Safe area for notch phones */}
       <div className="h-[env(safe-area-inset-bottom)]" />
     </nav>
   );

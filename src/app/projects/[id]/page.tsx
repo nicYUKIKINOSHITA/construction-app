@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { createChecksForItem } from '@/lib/checks';
-import { useUser } from '@/components/UserContext';
 import BottomNav from '@/components/BottomNav';
 import DeadlineBadge from '@/components/DeadlineBadge';
 import { getDeadlineInfo } from '@/lib/deadline';
@@ -12,6 +11,9 @@ import StopReasonPicker from '@/components/StopReasonPicker';
 import ItemMergeDialog from '@/components/ItemMergeDialog';
 import { WORKFLOW_STEPS, SUB_STEPS_12, CHECKS_PER_ITEM } from '@/lib/constants';
 import type { Item, Check, User as AppUser } from '@/lib/types';
+
+// 担当者5名（社長・山本・森を除く）
+const ASSIGNEE_NAMES = ['専務', '堺', '児玉', '水田', '清水'];
 
 interface ProjectData {
   id: string;
@@ -23,7 +25,6 @@ interface ProjectData {
 
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { user } = useUser();
   const router = useRouter();
 
   const [project, setProject] = useState<ProjectData | null>(null);
@@ -55,7 +56,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         .select('*, users!projects_assignee_id_fkey(name)')
         .eq('id', id)
         .single(),
-      supabase.from('users').select('id, name').order('name'),
+      supabase.from('users').select('id, name').in('name', ASSIGNEE_NAMES).order('name'),
       supabase
         .from('items')
         .select('*, checks(*)')
@@ -84,10 +85,6 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   }, [loadProject]);
 
   useEffect(() => {
-    if (!user) {
-      router.replace('/');
-      return;
-    }
     loadProject();
 
     const channel = supabase
@@ -101,7 +98,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       if (debounceRef.current) clearTimeout(debounceRef.current);
       supabase.removeChannel(channel);
     };
-  }, [user, router, loadProject, debouncedReload, id]);
+  }, [loadProject, debouncedReload, id]);
 
   // Calculate totals
   const totalChecks = items.reduce((sum, item) => sum + (item.checks?.length || 0), 0);
@@ -112,14 +109,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const progress = totalChecks > 0 ? Math.round((checkedCount / totalChecks) * 100) : 0;
 
   async function toggleCheck(check: Check) {
-    if (!user) return;
     const newChecked = !check.checked;
     await supabase
       .from('checks')
       .update({
         checked: newChecked,
         checked_at: newChecked ? new Date().toISOString() : null,
-        checked_by: newChecked ? user.id : null,
+        checked_by: null,
         stop_reason: newChecked ? null : check.stop_reason,
       })
       .eq('id', check.id);
@@ -134,7 +130,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 ...c,
                 checked: newChecked,
                 checked_at: newChecked ? new Date().toISOString() : null,
-                checked_by: newChecked ? user.id : null,
+                checked_by: null,
                 stop_reason: newChecked ? null : c.stop_reason,
               }
             : c
@@ -251,8 +247,6 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     setItems(items.map((i) => i.id === itemId ? { ...i, deadline: newDeadline } : i));
     setEditingItemDeadline(null);
   }
-
-  if (!user) return null;
 
   if (!project) {
     return (

@@ -4,13 +4,11 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { useUser } from '@/components/UserContext';
 import BottomNav from '@/components/BottomNav';
 import ProjectCard from '@/components/ProjectCard';
 import type { Project } from '@/lib/types';
 
 export default function ProjectsPage() {
-  const { user } = useUser();
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,10 +80,6 @@ export default function ProjectsPage() {
   }, [loadProjects]);
 
   useEffect(() => {
-    if (!user) {
-      router.replace('/');
-      return;
-    }
     loadProjects();
 
     const channel = supabase
@@ -99,9 +93,7 @@ export default function ProjectsPage() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       supabase.removeChannel(channel);
     };
-  }, [user, router, loadProjects, debouncedReload]);
-
-  if (!user) return null;
+  }, [loadProjects, debouncedReload]);
 
   return (
     <div className="pb-20">

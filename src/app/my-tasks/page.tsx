@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { useUser } from '@/components/UserContext';
 import BottomNav from '@/components/BottomNav';
 import DeadlineBadge from '@/components/DeadlineBadge';
 import StopReasonPicker from '@/components/StopReasonPicker';
@@ -22,28 +21,20 @@ interface TaskItem {
 }
 
 export default function MyTasksPage() {
-  const { user } = useUser();
   const router = useRouter();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [reasonTarget, setReasonTarget] = useState<TaskItem | null>(null);
 
   useEffect(() => {
-    if (!user) {
-      router.replace('/');
-      return;
-    }
     loadTasks();
-  }, [user, router]);
+  }, []);
 
   async function loadTasks() {
-    if (!user) return;
-
-    // Get projects assigned to this user
+    // Get all projects
     const { data: projects } = await supabase
       .from('projects')
-      .select('id, name')
-      .eq('assignee_id', user.id);
+      .select('id, name');
 
     if (!projects || projects.length === 0) {
       setTasks([]);
@@ -54,7 +45,7 @@ export default function MyTasksPage() {
     const projectMap = new Map(projects.map((p) => [p.id, p.name]));
     const projectIds = projects.map((p) => p.id);
 
-    // Get active items for these projects
+    // Get active items
     const { data: items } = await supabase
       .from('items')
       .select('id, name, deadline, project_id')
@@ -92,7 +83,6 @@ export default function MyTasksPage() {
       };
     });
 
-    // Sort by deadline, then step number
     taskList.sort((a, b) => {
       if (a.deadline !== b.deadline) return a.deadline < b.deadline ? -1 : 1;
       if (a.step_number !== b.step_number) return a.step_number - b.step_number;
@@ -104,13 +94,12 @@ export default function MyTasksPage() {
   }
 
   async function handleCheck(task: TaskItem) {
-    if (!user) return;
     await supabase
       .from('checks')
       .update({
         checked: true,
         checked_at: new Date().toISOString(),
-        checked_by: user.id,
+        checked_by: null,
         stop_reason: null,
       })
       .eq('id', task.check_id);
@@ -142,8 +131,6 @@ export default function MyTasksPage() {
     return `${toCircled(stepNumber)}${step?.label || ''}`;
   }
 
-  if (!user) return null;
-
   // Group by project
   const grouped = new Map<string, TaskItem[]>();
   tasks.forEach((t) => {
@@ -155,7 +142,7 @@ export default function MyTasksPage() {
   return (
     <div className="pb-20">
       <header className="sticky top-0 bg-blue-600 text-white px-4 py-3 z-40">
-        <h1 className="text-lg font-bold">マイタスク</h1>
+        <h1 className="text-lg font-bold">全タスク</h1>
         <p className="text-xs text-blue-200">未完了: {tasks.length}件</p>
       </header>
 

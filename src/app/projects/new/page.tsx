@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { createChecksForItem } from '@/lib/checks';
-import { useUser } from '@/components/UserContext';
 import type { User } from '@/lib/types';
 
 interface ItemInput {
@@ -14,10 +13,12 @@ interface ItemInput {
 
 type InputMode = 'select' | 'paste' | 'manual' | 'pdf';
 
+// 担当者5名（社長・山本・森を除く）
+const ASSIGNEE_NAMES = ['専務', '堺', '児玉', '水田', '清水'];
+
 export default function NewProjectPage() {
-  const { user } = useUser();
   const router = useRouter();
-  const [users, setUsers] = useState<User[]>([]);
+  const [assignees, setAssignees] = useState<User[]>([]);
   const [saving, setSaving] = useState(false);
 
   const [inputMode, setInputMode] = useState<InputMode>('select');
@@ -32,17 +33,13 @@ export default function NewProjectPage() {
   const pasteRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (!user) {
-      router.replace('/');
-      return;
-    }
-    setAssigneeId(user.id);
     supabase
       .from('users')
       .select('*')
+      .in('name', ASSIGNEE_NAMES)
       .order('name')
-      .then(({ data }) => setUsers(data || []));
-  }, [user, router]);
+      .then(({ data }) => setAssignees(data || []));
+  }, []);
 
   // Parse pasted Excel data (tab-separated: No, 製品名, 仕様, 数量, 備考)
   function parsePasteData(text: string): ItemInput[] {
@@ -141,7 +138,7 @@ export default function NewProjectPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!user || saving) return;
+    if (saving) return;
     if (!name.trim()) { alert('案件名を入力してください'); return; }
     if (!assigneeId) { alert('担当者を選択してください'); return; }
 
@@ -179,7 +176,7 @@ export default function NewProjectPage() {
           assignee_id: assigneeId,
           estimate_pdf_url: pdfUrl,
           notify_days_before: notifyDays,
-          created_by: user.id,
+          created_by: assigneeId,
         })
         .select()
         .single();
@@ -205,8 +202,6 @@ export default function NewProjectPage() {
       setSaving(false);
     }
   }
-
-  if (!user) return null;
 
   const showForm = inputMode !== 'select' && (inputMode === 'manual' || items.length > 0 || inputMode === 'paste');
 
@@ -390,7 +385,7 @@ export default function NewProjectPage() {
                 className="w-full py-3 px-4 border border-gray-200 rounded-xl text-sm bg-white"
               >
                 <option value="">選択してください</option>
-                {users.map((u) => (
+                {assignees.map((u) => (
                   <option key={u.id} value={u.id}>{u.name}</option>
                 ))}
               </select>
