@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useUser } from '@/components/UserContext';
 
 export default function BottomNav() {
   const pathname = usePathname();
+  const { user } = useUser();
 
   const tabs = [
     { href: '/projects', label: '案件一覧', icon: '📋' },
@@ -30,6 +32,11 @@ export default function BottomNav() {
           );
         })}
       </div>
+      {user && (
+        <div className="text-center text-[10px] text-gray-400 pb-0.5 -mt-0.5">
+          {user.name}
+        </div>
+      )}
       <div className="h-[env(safe-area-inset-bottom)]" />
     </nav>
   );

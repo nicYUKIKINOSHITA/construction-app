@@ -52,3 +52,10 @@ export interface StopReason {
   label: string;
   sort_order: number;
 }
+
+export interface PersonalTask {
+  id: string;
+  user_id: string;
+  title: string;
+  created_at: string;
+}

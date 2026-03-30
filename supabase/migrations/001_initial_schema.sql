@@ -71,7 +71,7 @@ CREATE POLICY "allow_all" ON stop_reasons FOR ALL USING (true) WITH CHECK (true)
 
 -- 初期データ
 INSERT INTO users (name) VALUES
-  ('社長'), ('専務'), ('堺'), ('児玉'), ('水田'), ('清水'), ('森'), ('山本');
+  ('社長'), ('専務'), ('堺'), ('児玉'), ('水田'), ('清水'), ('森'), ('山本'), ('髙﨑');
 
 INSERT INTO stop_reasons (label, sort_order) VALUES
   ('ゼネコン返答待ち', 1),
