@@ -458,9 +458,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               )}
 
               {/* Item header - タップでチェックリスト開閉 */}
-              <button
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setExpandedItem(isExpanded ? null : item.id)}
-                className="w-full text-left p-4 active:bg-gray-50"
+                className="w-full text-left p-4 active:bg-gray-50 cursor-pointer"
               >
                 {/* Item name + 鉛筆アイコン */}
                 <div className="flex items-start mb-2 pr-16">
@@ -556,7 +558,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                       ))}
                   </div>
                 )}
-              </button>
+              </div>
 
               {/* Expanded checklist */}
               {isExpanded && (
